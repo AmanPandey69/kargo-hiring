@@ -181,12 +181,13 @@ export default async function Dashboard(props: PageProps<"/dashboard">) {
 }
 
 async function load() {
+  const sb = db(); // throws here (not inside Promise.all) if env is missing
   const [rubrics, candidates, scores, briefs, emails] = await Promise.all([
     getRubrics(),
-    db().from("candidates").select("id, full_name, role_applied, status, error_message, original_filename, created_at").order("created_at"),
-    db().from("scores").select("candidate_id, rubric_role, criterion_scores, weighted_total, band"),
-    db().from("briefs").select("candidate_id, role"),
-    db().from("emails").select("candidate_id, type, status, created_at").order("created_at", { ascending: false }),
+    sb.from("candidates").select("id, full_name, role_applied, status, error_message, original_filename, created_at").order("created_at"),
+    sb.from("scores").select("candidate_id, rubric_role, criterion_scores, weighted_total, band"),
+    sb.from("briefs").select("candidate_id, role"),
+    sb.from("emails").select("candidate_id, type, status, created_at").order("created_at", { ascending: false }),
   ]);
   const emailRows = must(emails, "load emails") as Pick<EmailRow, "candidate_id" | "type" | "status">[];
   const latestEmail = new Map<string, (typeof emailRows)[number]>();
