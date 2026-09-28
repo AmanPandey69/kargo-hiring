@@ -8,6 +8,20 @@ import { db, getRubrics, must } from "@/lib/supabase";
 import { otherRole, ROLES, type Band, type Candidate, type EmailRow, type Role, type ScoreRow } from "@/lib/types";
 
 const BAND_ORDER: Band[] = ["shortlist", "review", "below"];
+const BAND_HEADER: Record<Band, string> = {
+  shortlist: "border-emerald-100 bg-emerald-50 text-emerald-800",
+  review: "border-amber-100 bg-amber-50 text-amber-800",
+  below: "border-stone-200 bg-stone-100 text-stone-600",
+};
+const BAND_DOT: Record<Band, string> = { shortlist: "bg-emerald-500", review: "bg-amber-500", below: "bg-stone-400" };
+
+const initials = (name: string) =>
+  name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0]!.toUpperCase())
+    .join("");
 
 export default async function Dashboard(props: PageProps<"/dashboard">) {
   await connection();
@@ -46,13 +60,16 @@ export default async function Dashboard(props: PageProps<"/dashboard">) {
     .sort((a, b) => Number(b.s.weighted_total) - Number(a.s.weighted_total) || a.c.created_at.localeCompare(b.c.created_at));
 
   const rubric = rubrics[tab];
+  const bandCount = (b: Band) => rows.filter((r) => r.s.band === b).length;
+  const sentCount = rows.filter((r) => emails.get(r.c.id)?.status === "sent").length;
+  const draftCount = rows.filter((r) => emails.get(r.c.id)?.status === "draft").length;
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Candidates</h1>
-          <p className="mt-1 text-sm text-stone-600">
+          <p className="mt-1 max-w-2xl text-sm text-stone-600">
             Everyone is scored on both rubrics. This tab ranks all candidates on the {tab} rubric (v{rubric.version}). Nobody is hidden or auto-rejected.
           </p>
         </div>
@@ -61,52 +78,67 @@ export default async function Dashboard(props: PageProps<"/dashboard">) {
         </div>
       </div>
 
-      <div className="flex gap-1 border-b border-stone-200">
+      <div className="inline-flex rounded-lg border border-stone-200 bg-white p-1 shadow-sm">
         {ROLES.map((r) => (
           <Link
             key={r}
             href={`/dashboard?role=${r}`}
-            className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium ${
-              r === tab ? "border-stone-900 text-stone-900" : "border-transparent text-stone-500 hover:text-stone-800"
+            className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
+              r === tab ? "bg-stone-900 text-white shadow" : "text-stone-600 hover:bg-stone-100"
             }`}
           >
             {r === "PM" ? "Product Manager" : "Senior Product Manager"}
-            <span className="ml-2 text-xs text-stone-400">{scored.length}</span>
           </Link>
         ))}
       </div>
 
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+        <Stat label="Candidates" value={rows.length} />
+        <Stat label="Shortlist" value={bandCount("shortlist")} tone="emerald" />
+        <Stat label="Review" value={bandCount("review")} tone="amber" />
+        <Stat label="Below the line" value={bandCount("below")} tone="stone" />
+        <Stat label="Emails" value={`${sentCount} sent`} sub={`${draftCount} draft${draftCount === 1 ? "" : "s"} waiting`} />
+      </div>
+
       {rows.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-stone-300 bg-white p-8 text-center text-sm text-stone-500">
-          No scored candidates yet. <Link href="/" className="text-sky-700 hover:underline">Upload CVs</Link>.
-        </p>
+        <div className="rounded-xl border border-dashed border-stone-300 bg-white p-12 text-center">
+          <p className="text-sm text-stone-500">No scored candidates yet.</p>
+          <Link href="/" className="mt-3 inline-block rounded-md bg-stone-900 px-4 py-2 text-sm font-medium text-white">
+            Upload CVs
+          </Link>
+        </div>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-stone-200 bg-white">
-          <table className="w-full min-w-[820px] text-sm">
-            <thead className="bg-stone-50 text-left text-xs uppercase tracking-wide text-stone-500">
+        <div className="overflow-x-auto rounded-xl border border-stone-200 bg-white shadow-sm">
+          <table className="w-full min-w-[880px] text-sm">
+            <thead className="border-b border-stone-200 text-left text-[11px] font-semibold uppercase tracking-wider text-stone-500">
               <tr>
-                <th className="w-10 px-3 py-2">#</th>
-                <th className="px-3 py-2">Name</th>
-                <th className="px-3 py-2">Applied</th>
-                <th className="px-3 py-2 text-right">{tab} score</th>
-                <th className="px-3 py-2">Band</th>
-                <th className="px-3 py-2">Top 2 criteria</th>
-                <th className="px-3 py-2">Flags</th>
-                <th className="px-3 py-2">Email</th>
+                <th className="w-12 px-4 py-3">#</th>
+                <th className="px-3 py-3">Candidate</th>
+                <th className="w-44 px-3 py-3">{tab} score</th>
+                <th className="px-3 py-3">Top 2 criteria</th>
+                <th className="px-3 py-3">Flags</th>
+                <th className="px-3 py-3">Email</th>
+                <th className="w-8 px-3 py-3" />
               </tr>
             </thead>
             {BAND_ORDER.map((band) => {
               const inBand = rows.filter((r) => r.s.band === band);
               return (
-                <tbody key={band} className="border-t-2 border-stone-300">
-                  <tr className={band === "below" ? "bg-stone-100" : band === "review" ? "bg-amber-50" : "bg-emerald-50"}>
-                    <td colSpan={8} className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-stone-600">
-                      {BAND_LABEL[band]} · {band === "shortlist" ? "75–100" : band === "review" ? "55–74" : "20–54"} · {inBand.length}
+                <tbody key={band}>
+                  <tr>
+                    <td colSpan={7} className={`border-y px-4 py-2 ${BAND_HEADER[band]}`}>
+                      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider">
+                        <span className={`h-2 w-2 rounded-full ${BAND_DOT[band]}`} />
+                        {BAND_LABEL[band]}
+                        <span className="font-normal normal-case tracking-normal opacity-70">
+                          {band === "shortlist" ? "75–100" : band === "review" ? "55–74" : "20–54"} · {inBand.length} candidate{inBand.length === 1 ? "" : "s"}
+                        </span>
+                      </div>
                     </td>
                   </tr>
                   {inBand.length === 0 && (
                     <tr>
-                      <td colSpan={8} className="px-3 py-2 text-xs text-stone-400">None</td>
+                      <td colSpan={7} className="px-4 py-3 text-xs italic text-stone-400">No candidates in this band</td>
                     </tr>
                   )}
                   {inBand.map(({ c, s, other }) => {
@@ -114,42 +146,55 @@ export default async function Dashboard(props: PageProps<"/dashboard">) {
                     const top2 = topCriteria(rubric.criteria, s.criterion_scores);
                     const strongerOther = other && Number(other.weighted_total) > Number(s.weighted_total);
                     const email = emails.get(c.id);
+                    const total = Number(s.weighted_total);
                     return (
-                      <tr key={c.id} className="border-t border-stone-100 hover:bg-stone-50">
-                        <td className="px-3 py-2 text-stone-400">{rank}</td>
-                        <td className="px-3 py-2">
-                          <Link href={`/candidates/${c.id}`} className="font-medium text-stone-900 hover:underline">
-                            {c.full_name}
+                      <tr key={c.id} className="group border-t border-stone-100 transition-colors hover:bg-stone-50">
+                        <td className="px-4 py-3 font-mono text-xs text-stone-400">{rank}</td>
+                        <td className="px-3 py-3">
+                          <Link href={`/candidates/${c.id}`} className="flex items-center gap-3">
+                            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-stone-100 text-xs font-semibold text-stone-600">
+                              {initials(c.full_name)}
+                            </span>
+                            <span>
+                              <span className="block whitespace-nowrap font-medium text-stone-900 group-hover:underline">{c.full_name}</span>
+                              <span className="block whitespace-nowrap text-xs text-stone-500">Applied for {c.role_applied}</span>
+                            </span>
                           </Link>
                         </td>
-                        <td className="px-3 py-2">
-                          <Pill>{c.role_applied}</Pill>
+                        <td className="px-3 py-3">
+                          <div className="flex items-center gap-3">
+                            <span className="w-8 text-right font-mono text-base font-semibold tabular-nums">{total.toFixed(0)}</span>
+                            <div className="flex-1">
+                              <div className="h-1.5 w-full overflow-hidden rounded-full bg-stone-100">
+                                <div className={`h-full rounded-full ${BAND_DOT[s.band]}`} style={{ width: `${total}%` }} />
+                              </div>
+                              <div className="mt-1">
+                                <BandBadge band={s.band} />
+                              </div>
+                            </div>
+                          </div>
                         </td>
-                        <td className="px-3 py-2 text-right font-mono tabular-nums">{Number(s.weighted_total).toFixed(0)}</td>
-                        <td className="px-3 py-2">
-                          <BandBadge band={s.band} />
-                        </td>
-                        <td className="px-3 py-2 text-xs text-stone-600">
+                        <td className="px-3 py-3 text-xs text-stone-600">
                           {top2.map((cr) => (
-                            <div key={cr.id} className="truncate">
-                              <span className="font-mono text-stone-400">{cr.id}</span> {cr.name}{" "}
-                              <span className="font-medium text-stone-800">{s.criterion_scores[cr.id].score}/5</span>
+                            <div key={cr.id} className="flex items-center gap-2 py-0.5">
+                              <span className="w-10 font-mono text-stone-400">{cr.id}</span>
+                              <span className="max-w-56 truncate">{cr.name}</span>
+                              <span className="ml-auto rounded bg-stone-100 px-1.5 font-mono font-medium text-stone-800">{s.criterion_scores[cr.id].score}/5</span>
                             </div>
                           ))}
                         </td>
-                        <td className="space-x-1 px-3 py-2">
-                          {strongerOther && <Pill tone="violet">Stronger {otherRole(tab)} fit</Pill>}
-                          {topByRole[c.role_applied].has(c.id) && <Pill tone="blue">Top {TOP_N} {c.role_applied}</Pill>}
-                          {briefIds.has(`${c.id}:${c.role_applied}`) && <Pill>Brief</Pill>}
+                        <td className="px-3 py-3">
+                          <div className="flex flex-wrap gap-1">
+                            {strongerOther && <Pill tone="violet">↗ Stronger {otherRole(tab)} fit</Pill>}
+                            {topByRole[c.role_applied].has(c.id) && <Pill tone="blue">★ Top {TOP_N} {c.role_applied}</Pill>}
+                            {briefIds.has(`${c.id}:${c.role_applied}`) && <Pill>Brief ready</Pill>}
+                          </div>
                         </td>
-                        <td className="px-3 py-2 text-xs">
-                          {email ? (
-                            <span className={email.status === "sent" ? "text-emerald-700" : email.status === "failed" ? "text-red-700" : "text-stone-600"}>
-                              {email.type} · {email.status}
-                            </span>
-                          ) : (
-                            <span className="text-stone-400">no draft</span>
-                          )}
+                        <td className="px-3 py-3">
+                          <EmailStatus email={email} />
+                        </td>
+                        <td className="px-3 py-3 text-stone-300 group-hover:text-stone-600">
+                          <Link href={`/candidates/${c.id}`} aria-label={`Open ${c.full_name}`}>→</Link>
                         </td>
                       </tr>
                     );
@@ -210,5 +255,34 @@ function SetupError({ message }: { message: string }) {
         Check SUPABASE_URL and SUPABASE_ANON_KEY in .env.local and that the migration in supabase/migrations has been run.
       </p>
     </div>
+  );
+}
+
+function Stat({ label, value, sub, tone }: { label: string; value: number | string; sub?: string; tone?: "emerald" | "amber" | "stone" }) {
+  const accent = { emerald: "bg-emerald-500", amber: "bg-amber-500", stone: "bg-stone-400" };
+  return (
+    <div className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
+      <div className="flex items-center gap-1.5 text-xs font-medium text-stone-500">
+        {tone && <span className={`h-2 w-2 rounded-full ${accent[tone]}`} />}
+        {label}
+      </div>
+      <div className="mt-1 text-2xl font-semibold tabular-nums tracking-tight">{value}</div>
+      {sub && <div className="text-xs text-stone-500">{sub}</div>}
+    </div>
+  );
+}
+
+function EmailStatus({ email }: { email?: Pick<EmailRow, "type" | "status"> }) {
+  if (!email) return <span className="text-xs text-stone-400">No draft</span>;
+  const tone =
+    email.status === "sent"
+      ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
+      : email.status === "failed"
+        ? "bg-red-50 text-red-700 ring-red-200"
+        : "bg-white text-stone-600 ring-stone-200";
+  return (
+    <span className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${tone}`}>
+      {email.type === "invite" ? "Invite" : "Rejection"} · {email.status}
+    </span>
   );
 }

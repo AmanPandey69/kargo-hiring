@@ -9,7 +9,7 @@ export const BAND_LABEL: Record<Band, string> = { shortlist: "Shortlist", review
 
 export function BandBadge({ band }: { band: Band }) {
   return (
-    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${BAND_STYLE[band]}`}>
+    <span className={`inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${BAND_STYLE[band]}`}>
       {BAND_LABEL[band]}
     </span>
   );
@@ -22,5 +22,5 @@ export function Pill({ children, tone = "stone" }: { children: React.ReactNode; 
     violet: "bg-violet-100 text-violet-800",
     red: "bg-red-100 text-red-800",
   };
-  return <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium ${tones[tone]}`}>{children}</span>;
+  return <span className={`inline-flex items-center whitespace-nowrap rounded px-1.5 py-0.5 text-xs font-medium ${tones[tone]}`}>{children}</span>;
 }

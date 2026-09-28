@@ -26,6 +26,7 @@ export default function Uploader() {
   const [phase, setPhase] = useState<"idle" | "processing" | "drafting" | "done">("idle");
   const [refresh, setRefresh] = useState<RefreshProgress | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const update = (key: string, patch: Partial<Row>) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
@@ -116,7 +117,7 @@ export default function Uploader() {
         </p>
       </div>
 
-      <section className="grid gap-4 rounded-lg border border-stone-200 bg-white p-4 sm:grid-cols-[auto_1fr] sm:items-center">
+      <section className="grid gap-4 rounded-xl border border-stone-200 bg-white p-5 shadow-sm sm:grid-cols-[8rem_1fr] sm:items-center">
         <label className="text-sm font-medium">Role applied for</label>
         <div className="inline-flex w-fit rounded-md border border-stone-300 p-0.5">
           {(["PM", "SPM"] as Role[]).map((r) => (
@@ -132,21 +133,43 @@ export default function Uploader() {
           ))}
         </div>
 
-        <label className="text-sm font-medium" htmlFor="files">CV files</label>
-        <input
-          id="files"
-          ref={inputRef}
-          type="file"
-          multiple
-          accept={ACCEPT}
-          disabled={busy}
-          onChange={(e) => addFiles(e.target.files)}
-          className="text-sm file:mr-3 file:rounded file:border-0 file:bg-stone-900 file:px-3 file:py-1.5 file:text-white"
-        />
+        <label className="text-sm font-medium">CV files</label>
+        <label
+          htmlFor="files"
+          onDragOver={(e) => {
+            e.preventDefault();
+            if (!busy) setDragging(true);
+          }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragging(false);
+            if (!busy) addFiles(e.dataTransfer.files);
+          }}
+          className={`flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-10 text-center transition-colors ${
+            busy ? "cursor-not-allowed opacity-50" : dragging ? "border-emerald-500 bg-emerald-50" : "border-stone-300 hover:border-stone-400 hover:bg-stone-50"
+          }`}
+        >
+          <svg className="h-8 w-8 text-stone-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 16V4m0 0l-4 4m4-4l4 4M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2" />
+          </svg>
+          <span className="mt-2 text-sm font-medium text-stone-800">Drop CVs here or click to browse</span>
+          <span className="mt-0.5 text-xs text-stone-500">PDF or DOCX · up to 60 at once · 4 MB each</span>
+          <input
+            id="files"
+            ref={inputRef}
+            type="file"
+            multiple
+            accept={ACCEPT}
+            disabled={busy}
+            onChange={(e) => addFiles(e.target.files)}
+            className="sr-only"
+          />
+        </label>
       </section>
 
       {rows.length > 0 && (
-        <section className="rounded-lg border border-stone-200 bg-white">
+        <section className="overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
           <div className="flex flex-wrap items-center gap-3 border-b border-stone-200 px-4 py-3 text-sm">
             <span className="font-medium">{rows.length} file{rows.length === 1 ? "" : "s"}</span>
             <span className="text-stone-500">
@@ -212,7 +235,7 @@ export default function Uploader() {
       )}
 
       {phase !== "idle" && phase !== "processing" && (
-        <section className="rounded-lg border border-stone-200 bg-white p-4 text-sm">
+        <section className="rounded-xl border border-stone-200 bg-white p-5 text-sm shadow-sm">
           <div className="font-medium">Briefs & email drafts</div>
           {refresh ? (
             <>
