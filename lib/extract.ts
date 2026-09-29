@@ -1,5 +1,7 @@
 import "server-only";
 import mammoth from "mammoth";
+// Must be imported before pdf-parse so the PDF worker is bundled on serverless (Vercel).
+import "pdf-parse/worker";
 import { PDFParse } from "pdf-parse";
 
 export const MAX_FILE_BYTES = 4 * 1024 * 1024; // Vercel request body limit is 4.5 MB
@@ -47,6 +49,7 @@ export function guessName(text: string): string {
     const line = raw.trim();
     if (!line) continue;
     if (line.length > 60 || /[@\d|/:]/.test(line)) continue;
+    if (/\b(curriculum|vitae|resume|résumé|cv|profile|summary|product|manager|contact)\b/i.test(line)) continue;
     const words = line.split(/\s+/);
     if (words.length >= 1 && words.length <= 5) return titleCase(line);
   }
@@ -56,4 +59,11 @@ export function guessName(text: string): string {
 function titleCase(s: string): string {
   if (s !== s.toUpperCase()) return s;
   return s.toLowerCase().replace(/(^|[\s'-])(\p{L})/gu, (_, p, c) => p + c.toUpperCase());
+}
+
+/** True when every word of `name` appears in the CV text as a whole word. */
+export function nameAppearsIn(name: string, text: string): boolean {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return false;
+  return parts.every((p) => new RegExp(`(?<![\\p{L}])${p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}])`, "iu").test(text));
 }

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useRef, useState } from "react";
+import { nameFromFilename } from "@/lib/names";
 import { pool, runRefresh, type RefreshProgress } from "./refresh";
 
 type Role = "PM" | "SPM";
@@ -52,7 +53,13 @@ export default function Uploader() {
           rs.map((x) => (x.key === r.key ? { ...x, name: x.name || j.suggestedName || "", status: "ready", error: j.error } : x)),
         );
       } catch {
-        update(r.key, { status: "ready" });
+        setRows((rs) =>
+          rs.map((x) =>
+            x.key === r.key
+              ? { ...x, name: x.name || nameFromFilename(r.file.name), status: "ready", error: "Could not read this file to pre-fill the name; check it before processing" }
+              : x,
+          ),
+        );
       }
     });
   }
