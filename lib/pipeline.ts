@@ -1,6 +1,7 @@
 import "server-only";
 import { extractText } from "./extract";
-import { separatePii } from "./pii";
+import { nameFromFilename } from "./names";
+import { nameAppearsIn, separatePii } from "./pii";
 import { scoreCv } from "./scoring";
 import { db, getRubrics, must } from "./supabase";
 import { ROLES, type Role } from "./types";
@@ -16,6 +17,12 @@ export async function processUpload(file: File, fullName: string, role: Role): P
   let pii;
   try {
     const raw = await extractText(file);
+    // Second safety stop: if the file is named after someone who appears in the CV, the entered
+    // name must include that person's name (a heading or city would leave the real name unredacted).
+    const fromFile = nameFromFilename(file.name);
+    const entered = new Set(fullName.toLowerCase().split(/\s+/));
+    if (fromFile && nameAppearsIn(fromFile, raw) && !fromFile.toLowerCase().split(" ").every((w) => entered.has(w)))
+      throw new Error(`The file name suggests "${fromFile}" but the name entered is "${fullName.trim()}". Check the candidate name.`);
     pii = separatePii(raw, fullName);
   } catch (err) {
     // Record the failure without storing any unredacted text.

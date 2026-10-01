@@ -43,15 +43,22 @@ function normalise(s: string): string {
     .trim();
 }
 
-/** Best guess at the candidate's name: the first short line that looks like a name. */
+const HEADINGS =
+  /^(education|experience|work experience|professional experience|skills|core skills|key skills|summary|professional summary|profile|professional synopsis|objective|projects|achievements|certifications|contact|academic qualifications|scholastic achievements.*|languages|interests|references|curriculum vitae|resume|résumé|cv)$/i;
+
+/** A line that looks like a person's name: 2-4 capitalised words, letters only, not a heading. */
+function looksLikeName(line: string): boolean {
+  if (line.length > 40 || HEADINGS.test(line)) return false;
+  const words = line.split(/\s+/);
+  if (words.length < 2 || words.length > 4) return false;
+  return words.every((w) => /^\p{Lu}[\p{L}'’.-]*$/u.test(w) || /^\p{Lu}+$/u.test(w));
+}
+
+/** Best guess at the candidate's name from the first lines of the CV ("" if nothing looks like one). */
 export function guessName(text: string): string {
-  for (const raw of text.split("\n").slice(0, 8)) {
-    const line = raw.trim();
-    if (!line) continue;
-    if (line.length > 60 || /[@\d|/:]/.test(line)) continue;
-    if (/\b(curriculum|vitae|resume|résumé|cv|profile|summary|product|manager|contact)\b/i.test(line)) continue;
-    const words = line.split(/\s+/);
-    if (words.length >= 1 && words.length <= 5) return titleCase(line);
+  for (const raw of text.split("\n").slice(0, 10)) {
+    const line = raw.trim().replace(/\s+/g, " ");
+    if (line && looksLikeName(line)) return titleCase(line);
   }
   return "";
 }
@@ -59,11 +66,4 @@ export function guessName(text: string): string {
 function titleCase(s: string): string {
   if (s !== s.toUpperCase()) return s;
   return s.toLowerCase().replace(/(^|[\s'-])(\p{L})/gu, (_, p, c) => p + c.toUpperCase());
-}
-
-/** True when every word of `name` appears in the CV text as a whole word. */
-export function nameAppearsIn(name: string, text: string): boolean {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (!parts.length) return false;
-  return parts.every((p) => new RegExp(`(?<![\\p{L}])${p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}])`, "iu").test(text));
 }

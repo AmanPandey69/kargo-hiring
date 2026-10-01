@@ -70,7 +70,7 @@ export default function Uploader() {
         setRows((rs) =>
           rs.map((x) =>
             x.key === r.key
-              ? { ...x, name: x.name || nameFromFilename(r.file.name), status: "ready", error: "Could not read this file to pre-fill the name; check it before processing" }
+              ? { ...x, name: x.name || nameFromFilename(r.file.name), status: "ready", error: "Could not read this file to pre-fill the name; check it matches the CV before processing" }
               : x,
           ),
         );

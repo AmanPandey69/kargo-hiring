@@ -41,6 +41,13 @@ function nameRegex(fullName: string): RegExp | null {
   return new RegExp(`(?<![\\p{L}\\p{N}])(?:${alts})(?![\\p{L}\\p{N}])`, "giu");
 }
 
+/** True when every word of `name` appears in `text` as a whole word (case-insensitive). */
+export function nameAppearsIn(name: string, text: string): boolean {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return false;
+  return parts.every((p) => new RegExp(`(?<![\\p{L}\\p{N}])${escapeRe(p)}(?![\\p{L}\\p{N}])`, "iu").test(text));
+}
+
 export type PiiResult = {
   full_name: string;
   email: string | null;
@@ -51,6 +58,10 @@ export type PiiResult = {
 export function separatePii(rawText: string, fullName: string): PiiResult {
   const name = fullName.trim().replace(/\s+/g, " ");
   if (!name) throw new Error("Candidate name is required");
+  // Safety stop: redaction removes whatever name is given. If that name isn't in the CV, the
+  // real name would reach the model unredacted, so refuse instead of guessing.
+  if (!nameAppearsIn(name, rawText))
+    throw new Error(`The name "${name}" does not appear in this CV. Check the candidate name and try again.`);
 
   const email = rawText.match(EMAIL_RE)?.[0] ?? null;
   const phone = findPhones(rawText)[0] ?? null;
