@@ -36,6 +36,9 @@ export async function extractText(file: File): Promise<string> {
 
 function normalise(s: string): string {
   return s
+    .toWellFormed() // replace broken (lone surrogate) characters some PDFs contain
+    // Postgres rejects NUL; other control characters are invisible noise from PDF extraction.
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
     .replace(/\r\n?/g, "\n")
     .replace(/-- \d+ of \d+ --/g, "") // pdf-parse page markers
     .replace(/[ \t ]+/g, " ")
