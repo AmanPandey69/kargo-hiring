@@ -67,6 +67,7 @@ export type EmailRow = {
   subject: string;
   body: string;
   status: "draft" | "sent" | "failed";
+  origin: "system" | "arjun";
   resend_id: string | null;
   error_message: string | null;
   sent_at: string | null;

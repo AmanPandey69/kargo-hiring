@@ -5,7 +5,7 @@ import EmailPanel from "@/components/EmailPanel";
 import RescoreButton from "@/components/RescoreButton";
 import { BandBadge, Pill } from "@/components/ui";
 import { env } from "@/lib/env";
-import { rankApplicants, TOP_N } from "@/lib/ranking";
+import { policyFor, rankApplicants } from "@/lib/ranking";
 import { sendingConfigured } from "@/lib/send";
 import { db, getRubrics, must } from "@/lib/supabase";
 import { otherRole, type Brief, type Candidate, type EmailRow, type Role, type Rubric, type ScoreRow } from "@/lib/types";
@@ -28,8 +28,10 @@ export default async function CandidatePage(props: PageProps<"/candidates/[id]">
   const scores = must(scoresRes, "load scores") as ScoreRow[];
   const brief = (must(briefsRes, "load briefs") as Brief[]).find((b) => b.role === c.role_applied);
   const email = (must(emailsRes, "load email") as EmailRow[])[0] ?? null;
-  const rank = ranked.findIndex((r) => r.candidate.id === id) + 1;
-  const expectedType = rank > 0 && rank <= TOP_N ? "invite" : "rejection";
+  const me = ranked.find((r) => r.candidate.id === id);
+  const rank = me?.rank ?? 0;
+  // null = Review band: the system drafts nothing and Arjun picks.
+  const expectedType = me ? policyFor(me).email : null;
 
   // Applied role first.
   const order: Role[] = [c.role_applied, otherRole(c.role_applied)];

@@ -28,47 +28,80 @@ export async function rankApplicants(role: Role): Promise<Ranked[]> {
 
 export type Task =
   | { kind: "brief"; role: Role; candidateId: string }
-  | { kind: "email"; role: Role; candidateId: string; type: "invite" | "rejection" };
+  // manual = Arjun chose the email type himself (used for Review-band candidates)
+  | { kind: "email"; role: Role; candidateId: string; type: "invite" | "rejection"; manual?: boolean };
+
+/**
+ * What the system prepares for a candidate, combining the prompt (top 5 per role) with
+ * rubric.txt Part 6 (bands):
+ * - Top 5 or Shortlist (75-100): brief + draft invite
+ * - Review (55-74): brief only. Arjun reads it and decides; no email is drafted for him.
+ * - Below the line (20-54): draft rejection, which Arjun still reviews before sending.
+ * The system never sends or rejects on its own.
+ */
+export function policyFor(r: Ranked): { brief: boolean; email: "invite" | "rejection" | null } {
+  const top = r.rank <= TOP_N;
+  if (top || r.score.band === "shortlist") return { brief: true, email: "invite" };
+  if (r.score.band === "review") return { brief: true, email: null };
+  return { brief: false, email: "rejection" };
+}
 
 /**
  * Works out what needs (re)generating for a role and returns it as small tasks, so the
  * browser can run them one request at a time (keeps each request short and rate-limit friendly).
- * - If the top-5 set changed, stale briefs are deleted and all top-5 briefs regenerated.
- * - Top 5 need an invite draft, everyone else a rejection draft. Sent emails are never touched.
+ * - Briefs: created for everyone who needs one, regenerated when the top 5 changes, and
+ *   removed for people who no longer need one.
+ * - Emails: drafted per policyFor. Sent emails and Review-band drafts (Arjun's call) are never touched.
  */
 export async function planRefresh(role: Role): Promise<Task[]> {
   const ranked = await rankApplicants(role);
-  const top = new Set(ranked.slice(0, TOP_N).map((r) => r.candidate.id));
+  const needsBrief = new Set(ranked.filter((r) => policyFor(r).brief).map((r) => r.candidate.id));
   const tasks: Task[] = [];
 
   const briefs = must(await db().from("briefs").select("candidate_id, created_at").eq("role", role), "load briefs") as {
     candidate_id: string;
     created_at: string;
   }[];
-  const briefIds = new Set(briefs.map((b) => b.candidate_id));
-  const sameSet = briefIds.size === top.size && [...top].every((id) => briefIds.has(id));
-  const stale = [...briefIds].filter((id) => !top.has(id));
+  const stale = briefs.filter((b) => !needsBrief.has(b.candidate_id)).map((b) => b.candidate_id);
   if (stale.length) must(await db().from("briefs").delete().eq("role", role).in("candidate_id", stale), "delete stale briefs");
-  for (const r of ranked.slice(0, TOP_N)) {
-    const rescoredSinceBrief = briefs.find((b) => b.candidate_id === r.candidate.id && b.created_at < r.score.created_at);
-    if (!sameSet || rescoredSinceBrief) tasks.push({ kind: "brief", role, candidateId: r.candidate.id });
+
+  // The top 5 changed if someone in it was scored after a brief was written. Briefs mention
+  // rank, so they are all regenerated then (this is the "regenerate when top 5 changes" rule).
+  const newestTopScore = ranked
+    .slice(0, TOP_N)
+    .map((r) => r.score.created_at)
+    .sort()
+    .at(-1) ?? "";
+  for (const r of ranked) {
+    if (!needsBrief.has(r.candidate.id)) continue;
+    const b = briefs.find((x) => x.candidate_id === r.candidate.id);
+    if (!b || b.created_at < r.score.created_at || b.created_at < newestTopScore)
+      tasks.push({ kind: "brief", role, candidateId: r.candidate.id });
   }
 
   if (ranked.length) {
     const emails = must(
       await db()
         .from("emails")
-        .select("candidate_id, type, status, created_at")
+        .select("id, candidate_id, type, status, origin, created_at")
         .in("candidate_id", ranked.map((r) => r.candidate.id))
         .order("created_at", { ascending: false }),
       "load emails",
-    ) as Pick<EmailRow, "candidate_id" | "type" | "status">[];
+    ) as Pick<EmailRow, "id" | "candidate_id" | "type" | "status" | "origin">[];
+    const drop: string[] = [];
     for (const r of ranked) {
       const mine = emails.filter((e) => e.candidate_id === r.candidate.id);
       if (mine.some((e) => e.status === "sent")) continue; // already contacted; leave alone
-      const want = top.has(r.candidate.id) ? "invite" : "rejection";
+      if (mine[0]?.origin === "arjun") continue; // Arjun's own choice always stands
+      const want = policyFor(r).email;
+      if (!want) {
+        // Review band: Arjun decides, so remove any draft the system made before the score moved here.
+        drop.push(...mine.filter((e) => e.origin === "system").map((e) => e.id));
+        continue;
+      }
       if (mine[0]?.type !== want) tasks.push({ kind: "email", role, candidateId: r.candidate.id, type: want });
     }
+    if (drop.length) must(await db().from("emails").delete().in("id", drop).neq("status", "sent"), "remove system drafts in Review band");
   }
   return tasks;
 }
@@ -78,10 +111,10 @@ export async function runTask(task: Task): Promise<{ skipped?: string }> {
   const idx = ranked.findIndex((r) => r.candidate.id === task.candidateId);
   if (idx < 0) return { skipped: "candidate no longer ranked" };
   const me = ranked[idx];
-  const inTop = idx < TOP_N;
+  const policy = policyFor(me);
 
   if (task.kind === "brief") {
-    if (!inTop) return { skipped: "no longer in top 5" };
+    if (!policy.brief) return { skipped: "no brief needed at this score" };
     const rubric = await getRubric(task.role);
     const brief = await draftBrief({
       rubric,
@@ -102,19 +135,27 @@ export async function runTask(task: Task): Promise<{ skipped?: string }> {
     return {};
   }
 
-  const want = inTop ? "invite" : "rejection";
+  const want = task.manual ? task.type : policy.email;
   if (want !== task.type) return { skipped: "rank changed since planning" };
   const existing = must(
-    await db().from("emails").select("id, status").eq("candidate_id", task.candidateId),
+    await db().from("emails").select("id, status, origin").eq("candidate_id", task.candidateId).order("created_at", { ascending: false }),
     "load emails",
-  ) as Pick<EmailRow, "id" | "status">[];
+  ) as Pick<EmailRow, "id" | "status" | "origin">[];
   if (existing.some((e) => e.status === "sent")) return { skipped: "email already sent" };
+  if (!task.manual && existing[0]?.origin === "arjun") return { skipped: "Arjun chose this draft himself" };
 
   const draft = await draftEmail({ type: want, role: task.role, redactedCv: me.candidate.cv_content_redacted ?? "" });
   // Replace unsent drafts with the new one (a failed send is kept only until redrafted).
   if (existing.length) must(await db().from("emails").delete().in("id", existing.map((e) => e.id)), "clear old drafts");
   must(
-    await db().from("emails").insert({ candidate_id: task.candidateId, type: want, subject: draft.subject, body: draft.body, status: "draft" }),
+    await db().from("emails").insert({
+      candidate_id: task.candidateId,
+      type: want,
+      subject: draft.subject,
+      body: draft.body,
+      status: "draft",
+      origin: task.manual ? "arjun" : "system",
+    }),
     "save email draft",
   );
   return {};

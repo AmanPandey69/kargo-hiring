@@ -2,12 +2,21 @@
 
 import Link from "next/link";
 import { useRef, useState } from "react";
-import { nameFromFilename } from "@/lib/names";
+import { nameFromFilename, roleFromFilename } from "@/lib/names";
 import { pool, runRefresh, type RefreshProgress } from "./refresh";
 
 type Role = "PM" | "SPM";
 type RowStatus = "reading" | "ready" | "queued" | "processing" | "scored" | "error";
-type Row = { key: string; file: File; name: string; status: RowStatus; error?: string; candidateId?: string };
+type Row = {
+  key: string;
+  file: File;
+  name: string;
+  role: Role;
+  roleLocked: boolean; // true when set from the file name or by hand; otherwise follows the default
+  status: RowStatus;
+  error?: string;
+  candidateId?: string;
+};
 
 const UPLOAD_CONCURRENCY = 2; // small limit: each CV makes two model calls
 const ACCEPT = ".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -34,12 +43,17 @@ export default function Uploader() {
 
   async function addFiles(list: FileList | null) {
     if (!list?.length) return;
-    const fresh: Row[] = Array.from(list).map((file, i) => ({
-      key: `${Date.now()}-${i}-${file.name}`,
-      file,
-      name: "",
-      status: "reading",
-    }));
+    const fresh: Row[] = Array.from(list).map((file, i) => {
+      const detected = roleFromFilename(file.name);
+      return {
+        key: `${Date.now()}-${i}-${file.name}`,
+        file,
+        name: "",
+        role: detected ?? role,
+        roleLocked: detected !== null,
+        status: "reading",
+      };
+    });
     setRows((rs) => [...rs, ...fresh]);
     if (inputRef.current) inputRef.current.value = "";
     // Pre-fill each name from the first line of the CV; the user can edit it.
@@ -80,7 +94,7 @@ export default function Uploader() {
     const fd = new FormData();
     fd.append("file", r.file);
     fd.append("name", r.name);
-    fd.append("role", role);
+    fd.append("role", r.role);
     try {
       const res = await fetch("/api/candidates", { method: "POST", body: fd });
       const j = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
@@ -106,7 +120,15 @@ export default function Uploader() {
     setPhase("done");
   }
 
+  function setDefaultRole(r: Role) {
+    setRole(r);
+    // Files without pm_/spm_ in their name follow the default.
+    setRows((rs) => rs.map((x) => (!x.roleLocked && (x.status === "ready" || x.status === "reading") ? { ...x, role: r } : x)));
+  }
+
   const ready = rows.filter((r) => r.status === "ready");
+  const readyPm = ready.filter((r) => r.role === "PM").length;
+  const readySpm = ready.length - readyPm;
   const missingNames = ready.filter((r) => !r.name.trim()).length;
   const busy = phase === "processing" || phase === "drafting";
   const counts = {
@@ -125,19 +147,24 @@ export default function Uploader() {
       </div>
 
       <section className="grid gap-4 rounded-xl border border-stone-200 bg-white p-5 shadow-sm sm:grid-cols-[8rem_1fr] sm:items-center">
-        <label className="text-sm font-medium">Role applied for</label>
+        <label className="text-sm font-medium">Default role</label>
+        <div className="flex flex-wrap items-center gap-3">
         <div className="inline-flex w-fit rounded-md border border-stone-300 p-0.5">
           {(["PM", "SPM"] as Role[]).map((r) => (
             <button
               key={r}
               type="button"
               disabled={busy}
-              onClick={() => setRole(r)}
+              onClick={() => setDefaultRole(r)}
               className={`rounded px-3 py-1 text-sm ${role === r ? "bg-stone-900 text-white" : "text-stone-700 hover:bg-stone-100"}`}
             >
               {r === "PM" ? "Product Manager (PM)" : "Senior PM (SPM)"}
             </button>
           ))}
+        </div>
+        <span className="text-xs text-stone-500">
+          Files named <code className="rounded bg-stone-100 px-1">pm_…</code> or <code className="rounded bg-stone-100 px-1">spm_…</code> are set automatically. You can change any file below.
+        </span>
         </div>
 
         <label className="text-sm font-medium">CV files</label>
@@ -198,7 +225,7 @@ export default function Uploader() {
                 onClick={() => processAll()}
                 className="rounded bg-stone-900 px-3 py-1.5 font-medium text-white disabled:opacity-40"
               >
-                {busy ? "Working…" : `Process ${ready.length} as ${role}`}
+                {busy ? "Working…" : `Process ${ready.length} CV${ready.length === 1 ? "" : "s"} (${readyPm} PM · ${readySpm} SPM)`}
               </button>
             </div>
           </div>
@@ -209,7 +236,7 @@ export default function Uploader() {
           )}
           <ul className="divide-y divide-stone-100">
             {rows.map((r) => (
-              <li key={r.key} className="grid gap-2 px-4 py-2.5 text-sm sm:grid-cols-[1fr_16rem_10rem] sm:items-center">
+              <li key={r.key} className="grid gap-2 px-4 py-2.5 text-sm sm:grid-cols-[1fr_16rem_6.5rem_10rem] sm:items-center">
                 <div className="min-w-0">
                   <div className="truncate text-stone-800">{r.file.name}</div>
                   {r.error && <div className="text-xs text-red-700">{r.error}</div>}
@@ -221,6 +248,18 @@ export default function Uploader() {
                   onChange={(e) => update(r.key, { name: e.target.value })}
                   className="rounded border border-stone-300 px-2 py-1 disabled:bg-stone-50 disabled:text-stone-500"
                 />
+                <select
+                  value={r.role}
+                  aria-label={`Role for ${r.file.name}`}
+                  disabled={r.status !== "ready" && r.status !== "reading"}
+                  onChange={(e) => update(r.key, { role: e.target.value as Role, roleLocked: true })}
+                  className={`rounded border px-2 py-1 font-medium disabled:opacity-60 ${
+                    r.role === "SPM" ? "border-violet-200 bg-violet-50 text-violet-800" : "border-sky-200 bg-sky-50 text-sky-800"
+                  }`}
+                >
+                  <option value="PM">PM</option>
+                  <option value="SPM">SPM</option>
+                </select>
                 <div className="flex items-center gap-2">
                   <StatusDot status={r.status} />
                   <span className="text-stone-600">{STATUS_TEXT[r.status]}</span>

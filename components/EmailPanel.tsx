@@ -10,7 +10,7 @@ type Props = {
   fullName: string;
   candidateEmail: string | null;
   email: EmailRow | null;
-  expectedType: "invite" | "rejection";
+  expectedType: "invite" | "rejection" | null;
   sendingConfigured: boolean;
   testRecipient: string;
 };
@@ -29,13 +29,13 @@ export default function EmailPanel(props: Props) {
 
   const dirty = email && (subject !== email.subject || body !== email.body);
 
-  async function generate() {
+  async function generate(type: "invite" | "rejection", manual = false) {
     setBusy("draft");
     setMsg(null);
     const res = await fetch("/api/tasks", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ kind: "email", role: props.role, candidateId: props.candidateId, type: props.expectedType }),
+      body: JSON.stringify({ kind: "email", role: props.role, candidateId: props.candidateId, type, manual }),
     });
     const j = await res.json().catch(() => ({}));
     setBusy(null);
@@ -75,12 +75,30 @@ export default function EmailPanel(props: Props) {
 
   if (!email) {
     return (
-      <section className="rounded-lg border border-stone-200 bg-white p-4">
+      <section className="rounded-xl border border-stone-200 bg-white p-5 shadow-sm">
         <h2 className="text-sm font-semibold">Email</h2>
-        <p className="mt-2 text-sm text-stone-600">No draft yet. Based on the current ranking this candidate would get a {props.expectedType} draft.</p>
-        <button type="button" onClick={generate} disabled={busy !== null} className="mt-3 rounded bg-stone-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50">
-          {busy === "draft" ? "Drafting…" : `Draft ${props.expectedType}`}
-        </button>
+        {props.expectedType ? (
+          <>
+            <p className="mt-2 text-sm text-stone-600">No draft yet. Based on the current ranking this candidate gets a {props.expectedType} draft.</p>
+            <button type="button" onClick={() => generate(props.expectedType!)} disabled={busy !== null} className="mt-3 rounded bg-stone-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50">
+              {busy === "draft" ? "Drafting…" : `Draft ${props.expectedType}`}
+            </button>
+          </>
+        ) : (
+          <>
+            <p className="mt-2 text-sm text-stone-600">
+              This candidate is in the <span className="font-medium text-amber-800">Review</span> band, so the system hasn&apos;t drafted anything. Read the brief, then choose:
+            </p>
+            <div className="mt-3 flex gap-2">
+              <button type="button" onClick={() => generate("invite", true)} disabled={busy !== null} className="rounded bg-stone-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50">
+                {busy === "draft" ? "Drafting…" : "Draft invite"}
+              </button>
+              <button type="button" onClick={() => generate("rejection", true)} disabled={busy !== null} className="rounded border border-stone-300 px-3 py-1.5 text-sm font-medium text-stone-700 hover:bg-stone-50 disabled:opacity-50">
+                Draft rejection
+              </button>
+            </div>
+          </>
+        )}
         {msg && <p className={`mt-2 text-sm ${msg.tone === "ok" ? "text-emerald-700" : "text-red-700"}`}>{msg.text}</p>}
       </section>
     );
@@ -89,7 +107,7 @@ export default function EmailPanel(props: Props) {
   const sent = email.status === "sent";
 
   return (
-    <section className="rounded-lg border border-stone-200 bg-white p-4">
+    <section className="rounded-xl border border-stone-200 bg-white p-5 shadow-sm">
       <div className="flex flex-wrap items-center gap-3">
         <h2 className="text-sm font-semibold">
           {email.type === "invite" ? "Interview invite" : "Rejection"} draft
@@ -104,11 +122,24 @@ export default function EmailPanel(props: Props) {
         {sent && email.sent_at && <span className="text-xs text-stone-500">sent {new Date(email.sent_at).toLocaleString()} · Resend id {email.resend_id}</span>}
       </div>
 
-      {!sent && email.type !== props.expectedType && (
+      {!sent && props.expectedType && email.type !== props.expectedType && (
         <div className="mt-3 rounded border border-amber-200 bg-amber-50 p-2 text-sm text-amber-900">
-          The ranking has changed: this is a {email.type} draft but the candidate is now in the {props.expectedType === "invite" ? "top 5" : "rest of the pool"}.{" "}
-          <button type="button" onClick={generate} className="font-medium underline" disabled={busy !== null}>
+          The ranking has changed: this is a {email.type} draft but the candidate now gets a{props.expectedType === "invite" ? "n" : ""} {props.expectedType}.{" "}
+          <button type="button" onClick={() => generate(props.expectedType!)} className="font-medium underline" disabled={busy !== null}>
             Redraft as {props.expectedType}
+          </button>
+        </div>
+      )}
+      {!sent && !props.expectedType && (
+        <div className="mt-3 rounded border border-amber-200 bg-amber-50 p-2 text-sm text-amber-900">
+          Review band: this {email.type} is your call.{" "}
+          <button
+            type="button"
+            onClick={() => generate(email.type === "invite" ? "rejection" : "invite", true)}
+            className="font-medium underline"
+            disabled={busy !== null}
+          >
+            Switch to {email.type === "invite" ? "rejection" : "invite"}
           </button>
         </div>
       )}

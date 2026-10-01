@@ -19,6 +19,12 @@ function isPhone(match: string): boolean {
   return true;
 }
 
+/** The number's last 10 digits with any separators between them, plus an optional country code. */
+function phoneVariants(phone: string): RegExp {
+  const national = phone.replace(/\D/g, "").slice(-10);
+  return new RegExp(`(?:\\+?\\d{1,3}[\\s.()-]*)?${national.split("").join("[\\s.()-]*")}`, "g");
+}
+
 function findPhones(text: string): string[] {
   return (text.match(PHONE_CANDIDATE_RE) ?? []).map((m) => m.trim()).filter(isPhone);
 }
@@ -53,6 +59,9 @@ export function separatePii(rawText: string, fullName: string): PiiResult {
   text = text.replace(PROFILE_URL_RE, REDACTED);
   text = text.replace(EMAIL_RE, REDACTED);
   text = text.replace(PHONE_CANDIDATE_RE, (m) => (isPhone(m.trim()) ? REDACTED : m));
+  // Second pass: every number found above, wherever else it appears (e.g. glued to a PIN code
+  // or written with different separators), matched on its last 10 digits.
+  for (const p of findPhones(rawText)) text = text.replace(phoneVariants(p), REDACTED);
   const nre = nameRegex(name);
   if (nre) text = text.replace(nre, REDACTED);
 
@@ -64,7 +73,7 @@ export function separatePii(rawText: string, fullName: string): PiiResult {
 export function assertClean(text: string, pii: { name: string; email: string | null; phone: string | null }) {
   const lower = text.toLowerCase();
   if (pii.email && lower.includes(pii.email.toLowerCase())) throw new Error("Redaction failed: email still present");
-  if (pii.phone && text.includes(pii.phone)) throw new Error("Redaction failed: phone still present");
+  if (pii.phone && phoneVariants(pii.phone).test(text)) throw new Error("Redaction failed: phone still present");
   const nre = nameRegex(pii.name);
   if (nre && nre.test(text)) throw new Error("Redaction failed: name still present");
   if (new RegExp(EMAIL_RE.source, "i").test(text)) throw new Error("Redaction failed: an email address is still present");

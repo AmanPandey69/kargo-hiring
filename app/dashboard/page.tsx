@@ -147,6 +147,9 @@ export default async function Dashboard(props: PageProps<"/dashboard">) {
                     const strongerOther = other && Number(other.weighted_total) > Number(s.weighted_total);
                     const email = emails.get(c.id);
                     const total = Number(s.weighted_total);
+                    // Review band on the applied role (and not top 5): the system drafts nothing; Arjun decides.
+                    const awaitingDecision =
+                      scoreOf(c.id, c.role_applied)?.band === "review" && !topByRole[c.role_applied].has(c.id);
                     return (
                       <tr key={c.id} className="group border-t border-stone-100 transition-colors hover:bg-stone-50">
                         <td className="px-4 py-3 font-mono text-xs text-stone-400">{rank}</td>
@@ -191,7 +194,7 @@ export default async function Dashboard(props: PageProps<"/dashboard">) {
                           </div>
                         </td>
                         <td className="px-3 py-3">
-                          <EmailStatus email={email} />
+                          <EmailStatus email={email} awaitingDecision={awaitingDecision} />
                         </td>
                         <td className="px-3 py-3 text-stone-300 group-hover:text-stone-600">
                           <Link href={`/candidates/${c.id}`} aria-label={`Open ${c.full_name}`}>→</Link>
@@ -272,7 +275,13 @@ function Stat({ label, value, sub, tone }: { label: string; value: number | stri
   );
 }
 
-function EmailStatus({ email }: { email?: Pick<EmailRow, "type" | "status"> }) {
+function EmailStatus({ email, awaitingDecision }: { email?: Pick<EmailRow, "type" | "status">; awaitingDecision?: boolean }) {
+  if (!email && awaitingDecision)
+    return (
+      <span className="inline-flex items-center whitespace-nowrap rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800 ring-1 ring-inset ring-amber-200">
+        Your call
+      </span>
+    );
   if (!email) return <span className="text-xs text-stone-400">No draft</span>;
   const tone =
     email.status === "sent"

@@ -6,7 +6,7 @@ export const maxDuration = 300;
 const role = z.enum(["PM", "SPM"]);
 const taskSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("brief"), role, candidateId: z.uuid() }),
-  z.object({ kind: z.literal("email"), role, candidateId: z.uuid(), type: z.enum(["invite", "rejection"]) }),
+  z.object({ kind: z.literal("email"), role, candidateId: z.uuid(), type: z.enum(["invite", "rejection"]), manual: z.boolean().optional() }),
 ]);
 
 export async function POST(req: Request) {
