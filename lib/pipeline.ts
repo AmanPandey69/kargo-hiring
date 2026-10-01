@@ -6,7 +6,7 @@ import { scoreCv } from "./scoring";
 import { db, getRubrics, must } from "./supabase";
 import { ROLES, type Role } from "./types";
 
-export type ProcessResult = { id: string | null; status: "scored" | "error"; error?: string };
+export type ProcessResult = { id: string | null; status: "scored" | "error"; error?: string; skipped?: string };
 
 /**
  * Upload pipeline for one CV:
@@ -14,6 +14,9 @@ export type ProcessResult = { id: string | null; status: "scored" | "error"; err
  * Only cv_content_redacted is ever sent to the model.
  */
 export async function processUpload(file: File, fullName: string, role: Role): Promise<ProcessResult> {
+  // Never score the same file twice (re-uploading a whole folder is safe).
+  const { data: existing } = await db().from("candidates").select("id").eq("original_filename", file.name).eq("status", "scored").limit(1);
+  if (existing?.length) return { id: existing[0].id, status: "scored", skipped: "Already uploaded" };
   let pii;
   try {
     const raw = await extractText(file);

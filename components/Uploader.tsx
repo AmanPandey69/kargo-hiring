@@ -6,7 +6,7 @@ import { nameFromFilename, roleFromFilename } from "@/lib/names";
 import { pool, runRefresh, type RefreshProgress } from "./refresh";
 
 type Role = "PM" | "SPM";
-type RowStatus = "reading" | "ready" | "queued" | "processing" | "scored" | "error";
+type RowStatus = "reading" | "ready" | "queued" | "processing" | "scored" | "duplicate" | "error";
 type Row = {
   key: string;
   file: File;
@@ -27,6 +27,7 @@ const STATUS_TEXT: Record<RowStatus, string> = {
   queued: "Queued",
   processing: "Redacting & scoring…",
   scored: "Scored",
+  duplicate: "Already uploaded",
   error: "Error",
 };
 
@@ -64,7 +65,13 @@ export default function Uploader() {
         const res = await fetch("/api/extract-name", { method: "POST", body: fd });
         const j = await res.json();
         setRows((rs) =>
-          rs.map((x) => (x.key === r.key ? { ...x, name: x.name || j.suggestedName || "", status: "ready", error: j.error } : x)),
+          rs.map((x) =>
+            x.key !== r.key
+              ? x
+              : j.alreadyUploaded
+                ? { ...x, status: "duplicate", candidateId: j.alreadyUploaded }
+                : { ...x, name: x.name || j.suggestedName || "", status: "ready", error: j.error },
+          ),
         );
       } catch {
         setRows((rs) =>
@@ -98,7 +105,7 @@ export default function Uploader() {
     try {
       const res = await fetch("/api/candidates", { method: "POST", body: fd });
       const j = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-      update(r.key, { status: j.status === "scored" ? "scored" : "error", error: j.error, candidateId: j.id ?? undefined });
+      update(r.key, { status: j.skipped ? "duplicate" : j.status === "scored" ? "scored" : "error", error: j.error, candidateId: j.id ?? undefined });
     } catch (err) {
       update(r.key, { status: "error", error: (err as Error).message });
     }
@@ -133,6 +140,7 @@ export default function Uploader() {
   const busy = phase === "processing" || phase === "drafting";
   const counts = {
     scored: rows.filter((r) => r.status === "scored").length,
+    duplicate: rows.filter((r) => r.status === "duplicate").length,
     error: rows.filter((r) => r.status === "error").length,
     inFlight: rows.filter((r) => r.status === "queued" || r.status === "processing").length,
   };
@@ -208,12 +216,13 @@ export default function Uploader() {
             <span className="font-medium">{rows.length} file{rows.length === 1 ? "" : "s"}</span>
             <span className="text-stone-500">
               {counts.scored} scored · {counts.error} error · {counts.inFlight} in progress
+              {counts.duplicate > 0 && ` · ${counts.duplicate} already uploaded (skipped)`}
             </span>
             <div className="ml-auto flex gap-2">
               {!busy && rows.some((r) => r.status !== "scored") && (
                 <button
                   type="button"
-                  onClick={() => setRows((rs) => rs.filter((r) => r.status === "scored"))}
+                  onClick={() => setRows((rs) => rs.filter((r) => r.status === "scored" || r.status === "duplicate"))}
                   className="rounded border border-stone-300 px-3 py-1.5 text-stone-700 hover:bg-stone-50"
                 >
                   Clear unprocessed
@@ -263,7 +272,7 @@ export default function Uploader() {
                 <div className="flex items-center gap-2">
                   <StatusDot status={r.status} />
                   <span className="text-stone-600">{STATUS_TEXT[r.status]}</span>
-                  {r.status === "scored" && r.candidateId && (
+                  {(r.status === "scored" || r.status === "duplicate") && r.candidateId && (
                     <Link href={`/candidates/${r.candidateId}`} className="ml-auto text-sky-700 hover:underline">
                       View
                     </Link>
@@ -315,6 +324,7 @@ function StatusDot({ status }: { status: RowStatus }) {
     queued: "bg-stone-300",
     processing: "bg-amber-400 animate-pulse",
     scored: "bg-emerald-500",
+    duplicate: "bg-stone-300",
     error: "bg-red-500",
   }[status];
   return <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${color}`} />;
